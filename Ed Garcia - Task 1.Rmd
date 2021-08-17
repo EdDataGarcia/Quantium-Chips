@@ -1,0 +1,893 @@
+---
+title: 'Task 1: Customer Trends & Target Segment, Jul 2018 - Jun 2019'
+author: "Ed Garcia"
+date: "8/17/2021"
+output: pdf_document
+---
+
+At the request of the Chips Category Manager, I am exploring and analyzing 1 year of transaction and customer data related to chips sales in an Australian retail chain. I am looking out for purchasing trends, target demographics, and insights for commercial recommendation to help the client develop their marketing strategy for the following year.
+
+### set options for R markdown knitting
+```{r}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+## LOAD REQUIRED LIBRARIES
+```{r}
+library(data.table) 
+library(ggplot2) 
+library(ggmosaic)
+library(tidyverse) 
+library(ggpubr)
+```
+
+## IMPORT SOURCE CSV FILES INTO R
+```{r}
+transactionData <- read.csv("C:/Users/garci/OneDrive/Desktop/Data Analysis Education/Forage Virtual Internships/Quantium Virtual Experience Program/QVI_transaction_data.csv")
+customerData <- read.csv("C:/Users/garci/OneDrive/Desktop/Data Analysis Education/Forage Virtual Internships/Quantium Virtual Experience Program/QVI_purchase_behaviour.csv")
+```
+
+## EXPLORATORY DATA ANALYSIS
+Now that the data files are loaded, inspect them to gain a broad understanding of their size, structure, and content. 
+
+This will inform the exploratory data analysis.
+```{r}
+str(transactionData)
+```
+
+```{r}
+head(transactionData)
+```
+
+From first glance, this is how I would summarize the transactionData data frame:
+
+* The date column refers to the date of each chips transaction. Also, the date is in a strange format. 
+
+* Store number is a store ID. 
+
+* Loyalty Card Number refers to individual customers. 
+
+* Transaction IDs are unique ID numbers that refer to individual transactions. 
+
+* Product number is a unique code assigned to each Product name. 
+
+* Product Quantity refers to the amount of products purchased in each transaction. 
+
+* Total sales is the amount of money spent on each transaction.
+
+```{r}
+str(customerData)
+```
+
+```{r}
+head(customerData)
+```
+
+From first glance, this is how I would summarize the customerData data frame: 
+ 
+* Loyalty Card Number refers to individual customers. This will be used to relate the transaction and customer data frames to each other.
+
+* Lifestage refers to the customer demographic according to general age and family size.
+
+* Premium Customer refers to the affluence level of the customer in regards to their general purchasing behavior Budget - they buy the cheapest brands, Mainstream - they buy standard-priced brands, Premium - they buy expensive brands. This category was predetermined by the client, and it is not exclusive to chips.
+
+I will clean and explore the transaction data first. 
+
+## CLEAN TRANSACTION DATA
+
+### Convert DATE column to a date format
+
+After further exploration, the dates are listed in an Excel Date serial number format. The dates must be converted using this code:
+```{r}
+transactionData$DATE <- as.Date(transactionData$DATE, origin = "1899-12-30")
+head(transactionData)
+```
+The dates are now in a readable format.
+
+## Examine PROD_NAME
+
+How many different distinct product names are there?
+```{r}
+n_distinct(transactionData$PROD_NAME)
+```
+There are 114 distinct product names. Is this correct? I noticed in the head code I ran earlier that there is an product named "Old El Paso Salsa Dip Tomato Mild 300g". This does not sound like a chip name. I want to determine what keywords appear the most in the PROD_NAMES column. To do that, first I must split the strings in this column.
+
+This splits the PROD_NAME strings into a separate data frame, using space as a delimiter:
+```{r}
+productWords <- data.table(unlist(strsplit(unique(transactionData$PROD_NAME), split = " ")))
+```
+
+This provides a count of each word:
+```{r}
+text_wordcounts <- productWords %>%
+  count(productWords$V1, sort = TRUE)
+text_wordcounts
+```
+The word "Salsa" appears 9 times, "Dip" appears 3 times, and "OnionDip" appears 1 time. Is it possible that these are not chips categories?
+
+Further explore the unique product names armed with this information:
+```{r}
+uniqueProducts <- data.frame(unique(transactionData$PROD_NAME)) 
+```
+Use the filter in the View pane of UniqueProducts dataframe to search for the words "Salsa" and "Dip".
+
+### In the View pane of RStudio, filter and examine "Salsa":
+
+After a Google search, I discovered that some of the products that contain the word "Salsa" are chips, and some are not chips: 
+
+Old El Paso Salsa Dip Tomato Mild         = not chips
+Red Rock Deli SR    Salsa & Mzzrlla 150g  = chips
+Smiths Crinkle Cut  Tomato Salsa 150g     = chips
+Doritos Salsa       Medium 300g           = not chips
+Old El Paso Salsa   Dip Chnky Tom Ht300g  = not chips
+Woolworths Mild     Salsa 300g            = not chips
+Old El Paso Salsa   Dip Tomato Med 300g   = not chips
+Woolworths Medium   Salsa 300g            = not chips
+Doritos Salsa Mild  300g                  = not chips
+
+### I CANNOT REMOVE ALL PRODUCTS WITH THE WORD "SALSA" OR I WILL BE REMOVING SEVERAL TRANSACTIONS FROM THE DATASET THAT ARE CHIPS PRODUCTS. 
+### The Chips Category Manager will not be happy if I provide insights on inaccurate data.
+
+
+### Filter (using View pane) and examine "Dip":
+
+After a Google search, I discovered that all of the products that contain the word "Dip" are not chips.
+
+Most of them were already included in the "Salsa" examination (and were found to be not chips). 
+
+### There is one non-salsa dip:
+
+Smiths Crinkle Cut  French OnionDip 150g  = not chips
+
+### I can safely remove all products with the word "Dip". These are not chips products.
+
+### Remove irrelevant data
+
+Remove all dip products:
+```{r}
+transactionData <- transactionData[!grepl("Dip", transactionData$PROD_NAME),]
+```
+
+Remove the actual salsa products:
+```{r}
+transactionData <- 
+  transactionData[!grepl("Doritos Salsa       Medium 300g", transactionData$PROD_NAME),]
+transactionData <- 
+  transactionData[!grepl("Woolworths Mild     Salsa 300g", transactionData$PROD_NAME),]
+transactionData <- 
+  transactionData[!grepl("Woolworths Medium   Salsa 300g", transactionData$PROD_NAME),]
+transactionData <- 
+  transactionData[!grepl("Doritos Salsa Mild  300g", transactionData$PROD_NAME),]
+```
+
+Re-examine PROD_NAME:
+```{r}
+n_distinct(transactionData$PROD_NAME)
+```
+There are now only 106 distinct product names. The 8 salsa/dip products have been removed.
+
+## REMOVE NULLS AND OUTLIERS FROM TRANSACTION DATA
+
+Summarize the data to check for nulls and possible outliers
+```{r}
+summary(transactionData)
+```
+After examining the data summary, here is what I've noticed:
+
+* There is 1 year of data: 2018-07-01 to 2019-06-30 ... Great!
+
+* There are no nulls ... Great!
+
+* There are outliers in PROD_QTY and TOT_SALES: the max value of PROD_QTY is 200 but the median is 2 and mean is 1.908. Similar issue in TOT_SALES. Are these outliers related to each other? ... Investigate further!
+
+Print the rows with the Max PROD_QTY:
+```{r}
+subset(transactionData, PROD_QTY == max(PROD_QTY))
+```
+This revealed that this large purchase was repeated twice by the same customer. ...Perhaps for a corporate event or other large gathering? Also, I can see that the PROD_QTY outlier (200) is related to the TOT_SALES outlier (650).
+
+Print all transactions from this particular customer:
+```{r}
+subset(transactionData, LYLTY_CARD_NBR == 226000)
+```
+Aha! The 2 outlier transactions were the only transactions from this customer. Due to this, 
+
+### I will remove these 2 outlier transactions from the dataset to prevent unnecessary skewness in my further analysis.
+
+Remove outlier transactions and recall the summary for this dataset:
+```{r}
+transactionData <- transactionData %>% 
+  filter(transactionData$LYLTY_CARD_NBR != 226000) 
+summary(transactionData) 
+```
+The max values for PROD+QTY and TOT_SALES now make much more sense, and are in line with the expected results.
+
+## CHECK FOR MISSING DATES
+
+Count the number of transactions by date:
+```{r}
+dateTrans <- transactionData %>%
+  count(transactionData$DATE, sort = TRUE)
+tibble(dateTrans)
+```
+There are only 364 rows, but there should be 365 in order to represent a full year. Which one is missing? 
+
+At the top of my tibble, I notice that the days with the most transactions are in late December, with December 24 as the top date. My Christmas spirit is first telling me to check if December 25 is missing:
+```{r}
+subset(transactionData, DATE == "2018-12-25")
+```
+### There were no transactions on Christmas.
+
+Add the missing date to dateTrans data frame and assign reader-friendly column names
+```{r}
+dateTrans <- rbind(dateTrans, c("2018-12-25", 0))
+colnames(dateTrans) <- c("Date", "NumberOfTransactions")
+dateTrans$NumberOfTransactions <- as.numeric(dateTrans$NumberOfTransactions)
+head(dateTrans)
+```
+
+The chips transactions data frame is now free of nulls, outliers, and missing dates.
+
+At this time, I would also like to visualize the transactions over time:
+```{r}
+ggplot(dateTrans) +
+  geom_point(aes(x = Date, y = NumberOfTransactions)) +
+  labs(x = "Day", y = "Number of Daily Transactions", 
+       title = "Daily Transactions over Time", subtitle = "July 2018 to June 2019") +
+  scale_x_date(breaks = "1 month") +
+  annotate("text", label = "<---- Dec 18-24", x = as.Date("2019-02-01"), y = 875, 
+           color = "red", size = 2.5, fontface = "bold") +
+  annotate("text", label = "<---- Stores closed on Chrismas Day", 
+           x = as.Date("2019-04-01"), y = 0, color = "red", 
+           size = 2.5, fontface = "bold") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+```
+The graph confirms that chips sales are fairly stable throughout the year, but the week leading up to Christmas there was a sharp spike in sales. There were no sales on Christmas day because the retail stores were closed for the holiday. 
+
+Find mean of daily transactions:
+```{r}
+mean(dateTrans$NumberOfTransactions)
+```
+The average daily transactions for the year is 680.
+
+Find the mean of daily of transactions during the Christmas sales peak:
+```{r}
+xmasDateTrans <- dateTrans %>%  
+  filter(Date > "2018-12-17" & Date < "2018-12-25")
+mean(xmasDateTrans$NumberOfTransactions)
+```
+Find out how much did sales increase during the Christmas sales peak:
+```{r}
+mean(xmasDateTrans$NumberOfTransactions) / mean(dateTrans$NumberOfTransactions)
+```
+### Sales increased by 22% during the Christmas sales peak.
+
+## EXTRACT RELEVANT TRANSACTION DATA
+
+Now I can extract relevant data from this data frame.
+
+Create a Pack Size column by extracting the digits that are in the PROD_NAME column strings:
+```{r}
+transactionData$PACK_SIZE <- parse_number(transactionData$PROD_NAME)
+head(transactionData)
+```
+
+Obtain a summary of the new PACK_SIZE column:
+```{r}
+summary(transactionData$PACK_SIZE)
+```
+The minimum chip pack size is 70g, and the maximum chip pack size is 380g.
+
+Plot a histogram of PACK_SIZE:
+```{r}
+ggplot(transactionData, aes(x = PACK_SIZE)) +
+  geom_histogram(binwidth = 50) +
+  labs(x = "Pack Size (g)", y = "Number of Transactions", 
+       title = "Transactions by Pack Size", subtitle = "July 2018 to June 2019")
+```
+From the histogram, I can see that the majority of chips transactions involved pack sizes between 150-200g, which is consistent with the mean (175.4g) and median (170g).
+
+Create a Brands column by extracting it from the product name:
+```{r}
+transactionData$BRANDS <- sub(" .*", "", transactionData$PROD_NAME)
+head(transactionData)
+```
+
+How many distinct chips brands are there?
+```{r}
+n_distinct(transactionData$BRANDS)
+```
+
+There are 28 distinct brands. Is this right? There may be duplicates or misspellings...
+```{r}
+uniqueBrands <- data.frame(unique(transactionData$BRANDS)) 
+tibble(uniqueBrands)
+```
+
+### Inspect the tibble above for potential duplicates. 
+
+### Use the filter in the View pane of UniqueBrands dataframe to search for any potential duplicates
+
+There are several duplicates:
+
+* Dorito and Doritos
+
+* GrnWves and Grain (Waves) (see note below)
+* Infzns and Infuzions
+* NCC and Natural (Chip Company)
+* Red (Rock Deli) and RRD
+* Smith and Smiths ... (actually spelled as "Smith's")
+* Snbts and Sunbites
+* WW and Woolworths
+
+(Grain Waves are actually made by Sunbites, but I have chosen to consider Grain Waves a separate "brand" since they are a distinctly different chip than Sunbites chips.)
+
+Combine duplicate PROD_NAME brands under a unifying BRANDS value:
+```{r}
+transactionData["BRANDS"][transactionData["BRANDS"] == "Dorito"] <- "Doritos"
+transactionData["BRANDS"][transactionData["BRANDS"] == "GrnWves"] <- "Grain Waves"
+transactionData["BRANDS"][transactionData["BRANDS"] == "Grain"] <- "Grain Waves"
+transactionData["BRANDS"][transactionData["BRANDS"] == "Infzns"] <- "Infuzions"
+transactionData["BRANDS"][transactionData["BRANDS"] == "NCC"] <- "Natural Chip Company"
+transactionData["BRANDS"][transactionData["BRANDS"] == "Natural"] <- "Natural Chip Company"
+transactionData["BRANDS"][transactionData["BRANDS"] == "Red"] <- "Red Rock Deli"
+transactionData["BRANDS"][transactionData["BRANDS"] == "RRD"] <- "Red Rock Deli"
+transactionData["BRANDS"][transactionData["BRANDS"] == "Smith"] <- "Smith's"
+transactionData["BRANDS"][transactionData["BRANDS"] == "Smiths"] <- "Smith's"
+transactionData["BRANDS"][transactionData["BRANDS"] == "Snbts"] <- "Sunbites"
+transactionData["BRANDS"][transactionData["BRANDS"] == "WW"] <- "Woolworths"
+tibble(unique(transactionData$BRANDS))
+```
+Now the chips brands names are cleaned and unified.
+
+Find the most products sold by brand:
+```{r}
+brandSales <- transactionData %>% 
+  group_by(BRANDS) %>%
+  summarise(PROD_QTY = sum(PROD_QTY))
+brandSales %>% 
+  arrange(desc(PROD_QTY))
+```
+
+Plot the most products sold by brand:
+```{r}
+ggplot(brandSales) +
+  geom_col(aes(x = reorder(BRANDS, PROD_QTY), y = PROD_QTY)) +
+  labs(x = "Brands", y = "Total Products Sold", 
+       title = "Total Products Sold by Brand", subtitle = "July 2018 to June 2019") +
+  geom_bracket(xmin = "Pringles", xmax = "Kettle", y.position = 90000, 
+               label = "Top Sellers", color = "red", tip.length = c(0.4, 0.1)) +
+  coord_cartesian(ylim = c(0, 95000)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.95))
+```
+
+### Kettle is by far the best selling brand with nearly 80k products sold. Smith's is 2nd best with just under 60k sold. Pringles and Doritos are roughly tied at 3rd with just under 50k products sold.
+
+December 18-24 represent the highest chips sales of the year. Find out which brands sold the best before Christmas:
+```{r}
+brandSalesXMas <- transactionData %>% 
+  filter(DATE > "2018-12-17" & DATE < "2018-12-25") %>% 
+  group_by(BRANDS) %>%
+  summarise(XMAS_PROD_QTY = sum(PROD_QTY))
+brandSalesXMas %>% 
+  arrange(desc(XMAS_PROD_QTY))
+```
+
+Find out how much Thins sales increased during Christmas sales peak compared to the rest of the year
+```{r}
+compareBrands <- merge(brandSales, brandSalesXMas, by = "BRANDS")
+compareBrands$WEEK_AVG <- round(compareBrands$PROD_QTY / 52)
+compareBrands$XMAS_PERC <- compareBrands$XMAS_PROD_QTY / compareBrands$WEEK_AVG
+compareBrands %>% 
+  select(BRANDS, XMAS_PERC) %>% 
+  arrange(desc(XMAS_PERC))
+```
+
+Plot the most products sold by brand during the sales peak prior to Christmas:
+```{r}
+ggplot(brandSalesXMas) +
+  geom_col(aes(x = reorder(BRANDS, XMAS_PROD_QTY), y = XMAS_PROD_QTY)) +
+  labs(x = "Brands", y = "Total Products Sold", 
+       title = "Total Products Sold by Brand", 
+       subtitle = "Christmas Sales Peak: Dec 18-24") +
+  annotate("text", label = "Noticeable improvement: Twisties (44%) and Thins (38%)", 
+           x = "Twisties", y = 1300, color = "red", size = 2.5, fontface = "bold") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.95)) +
+  geom_segment(aes(x = "Thins", y = 1200, xend = "Thins", yend = 750),
+                  arrow = arrow(length = unit(0.5, "cm")), color = "red") +
+  geom_segment(aes(x = "Twisties", y = 1200, xend = "Twisties", yend = 550),
+                  arrow = arrow(length = unit(0.5, "cm")), color = "red")
+```
+
+### The week leading up to Christmas reflects the general year-long brand trend with Kettle, Smith's, Doritos, and Pringles producing overwhelming sales. Thins and Twisties showed noticeable improvement. Sunbites, Burger, and CCs improved more, but their sales quantity is negligable in comparison to Thins and Twisties. 
+
+Find out which pack sizes sold the best before Christmas:
+```{r}
+packSalesXMas <- transactionData %>% 
+  filter(DATE > "2018-12-17" & DATE < "2018-12-25") %>% 
+  group_by(PACK_SIZE) %>%
+  summarise(PROD_QTY = sum(PROD_QTY))
+packSalesXMas %>% 
+  arrange(desc(PROD_QTY))
+```
+
+Plot a histogram of PACK_SIZE:
+```{r}
+ggplot(packSalesXMas) +
+  geom_col(aes(x = reorder(PACK_SIZE, PROD_QTY), y = PROD_QTY)) +
+  labs(x = "Pack Size", y = "Total Products Sold", 
+       title = "Total Products Sold by Pack Size", 
+       subtitle = "Christmas Sales Peak: Dec 18-24") +
+  geom_bracket(xmin = "200", xmax = "330", y.position = 1100, 
+               label = "Promos could uptick pack sizes > 175g", 
+               color = "red", tip.length = c(0.2, 0.1)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.95))
+```
+
+### Pack sizes purchased during the Christmas sales peak also reflect the general year-long trend: customers prefer pack sizes between 150-200g. In this case, customers overwhelmingly purchased 175g pack sizes (over 3000 sold in one week), as well as the slightly smaller 150g pack size (1800 sold in one week). Somewhat surprisingly, customers did not prefer packages of a size larger than 200g. Perhaps customers were more interested in purchasing a variety of chips brands during the holidays (in order to satisfy different people's tastes), and therefore stuck with a more mainstream pack size for each brand.
+
+## EXPLORE & MERGE CUSTOMER DATA
+```{r}
+summary(customerData)
+```
+There are no nulls and LYLTY_CARD_NBR is in the same format as in transaction dataframe. This is useful for establishing a relationship between the transaction and customer datasets.
+
+Use a left join to merge transactionData and customerData into one dataframe called "data":
+```{r}
+data <- merge(transactionData, customerData, all.x = TRUE)
+```
+
+```{r}
+summary(data)
+```
+There are still no nulls, and there are the same number of rows as in the transactions data frame. 
+
+```{r}
+head(data)
+```
+It is a successful join. Looks good!
+
+## DATA ANALYSIS ON CUSTOMER SEGMENTS
+
+### Define some metrics of interest to the client:
+
+1. Who spends the most on chips (total sales), describing customers by lifestage and affluence?     
+
+2. How many customers are in each segment?
+
+3. How many chips are bought per customer by segment?
+
+4. What's the average chip price by customer segment?
+
+### 1. Who spends the most on chips (total sales), describing customers by lifestage and affluence?
+
+Total sales by LIFESTAGE:
+```{r}
+data %>% 
+  group_by(LIFESTAGE)  %>% 
+  summarise(sum_of_sales = sum(TOT_SALES)) %>% 
+  arrange(desc(sum_of_sales))
+```
+### There are 7 lifestage categories. Older Singles/Couples have the most sales.
+
+Total sales by premium:
+```{r}
+data %>% 
+  group_by(PREMIUM_CUSTOMER)  %>% 
+  summarise(sum_of_sales = sum(TOT_SALES)) %>% 
+  arrange(desc(sum_of_sales))
+```
+### There are 3 affluence levels. The Mainstream level has the most sales.
+
+Total sales by customer segment (lifestage + premium as a combined column customer segment):
+```{r}
+data$CUSTOMER_SEGMENT <- paste(data$PREMIUM_CUSTOMER, data$LIFESTAGE, sep=" - ")
+salesCustomerSegment <- data %>% 
+  group_by(CUSTOMER_SEGMENT) %>% 
+  summarise(SUM_OF_SALES = sum(TOT_SALES))
+salesCustomerSegment %>%
+  arrange(desc(SUM_OF_SALES))
+```
+Top 3 Customer Segments with highest sales: Budget - Older Families, Mainstream - Young Singles/Couples, Mainstream - Retirees.
+
+Visualize the above summary:
+```{r fig.height = 5, fig.width = 8}
+ggplot(salesCustomerSegment) +
+  geom_col(aes(x = reorder(CUSTOMER_SEGMENT, SUM_OF_SALES), y = SUM_OF_SALES)) +
+  labs(x = "Customer Segment", y = "Sum of Sales ($)", 
+       title = "Total Sales by Customer Segment", subtitle = "July 2018 to June 2019") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.95))
+```
+It is easy to see from this column chart that the top 3 customer segments have much higher sales than the other customer segments.
+
+Proportion of sales by customer segment (i.e. lifestage + affluence are separated):
+```{r fig.height = 7, fig.width = 12}
+salesProportion <- data %>% 
+  group_by(LIFESTAGE, PREMIUM_CUSTOMER) %>% 
+  summarise(SALES = sum(TOT_SALES))
+p <- ggplot(data = salesProportion) +
+  geom_mosaic(aes(weight = SALES, x = product(PREMIUM_CUSTOMER, LIFESTAGE), 
+                  fill = PREMIUM_CUSTOMER)) +
+  labs(x = "Lifestage", y = "Customer Affluence", title = "Proportion of Sales", 
+       subtitle = "July 2018 to June 2019") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 0.95))
+p + geom_text(data = ggplot_build(p)$data[[1]], 
+              aes(x = (xmin + xmax)/2 , y = (ymin + ymax)/2, 
+                  label = as.character(paste(round(.wt/sum(.wt),3)*100, '%'))))
+```
+### The largest proportion of sales are coming from Budget - Older Families (8.7%), Mainstream - Young Singles/Couples (8.2%), and Mainstream - Retirees (8.1%).
+
+Are the higher sales due to there being more customers in these customer segments?
+
+## 2. How many customers are in each segment?
+
+Count the number of customers by customer segment
+```{r}
+countCustomerSegment <- data %>% 
+  select(c(LYLTY_CARD_NBR, CUSTOMER_SEGMENT)) 
+countCustomerSegment <- 
+  distinct(countCustomerSegment, LYLTY_CARD_NBR, .keep_all = TRUE) %>% 
+  group_by(CUSTOMER_SEGMENT) %>% 
+  tally()
+countCustomerSegment %>%
+  arrange(desc(n))
+```
+Top 2 Customer Segments with the most customers: Mainstream - Young Singles/Couples and Mainstream - Retirees. But not Budget - Older Families.
+
+Visualize the above summary:
+```{r fig.height = 5, fig.width = 8}
+ggplot(countCustomerSegment) +
+  geom_col(aes(x = reorder(CUSTOMER_SEGMENT, n), y = n)) +
+  labs(x = "Customer Segment", y = "Number of Customers", 
+       title = "Number of Customers by Customer Segment", 
+       subtitle = "July 2018 to June 2019") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.95))
+```
+It is easy to see from this column chart that the top 2 customer segments have much higher number of customers than the other customer segments.
+
+Proportion of customers by customer segment:
+```{r fig.height = 7, fig.width = 12}
+customerProportion <- data %>% 
+  select(c(LYLTY_CARD_NBR, LIFESTAGE, PREMIUM_CUSTOMER)) 
+customerProportion <- distinct(customerProportion, LYLTY_CARD_NBR, .keep_all = TRUE) %>% 
+  group_by(LIFESTAGE, PREMIUM_CUSTOMER) %>% 
+  tally()
+p <- ggplot(data = customerProportion) +
+  geom_mosaic(aes(weight = n, x = product(PREMIUM_CUSTOMER, LIFESTAGE), 
+                  fill = PREMIUM_CUSTOMER)) +
+  labs(x = "Lifestage", y = "Customer Affluence", title = "Proportion of Customers", 
+       subtitle = "July 2018 to June 2019") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.95))
+p + geom_text(data = ggplot_build(p)$data[[1]], 
+              aes(x = (xmin + xmax)/2 , y = (ymin + ymax)/2, 
+                  label = as.character(paste(round(.wt/sum(.wt),3)*100, '%'))))
+```
+The largest proportion of customers are coming from Mainstream - Young Singles/Couples (11.1%) and Mainstream - Retirees (8.9%). Budget - Older Families underwhelm in this category (6.5%).
+
+### The large number of customers in the Mainstream - Young Singles/Couples and Mainstream - Retirees segments contributes to their higher chips sales. This is not true for the Budget - Older Families segment, who incidentally have the highest chips sales. Since the Budget - Older Families segment prefers to purchase cheaper chips, one likely explanation is that they simply purchase more quantity of chips for their potentially larger family size. Older families tend to have larger family sizes (more children, and older children who can consume more chips than younger children). Therefore, is the quantity of chips purchased per transaction a major driver for chips sales?    
+
+### 3. How many chips are bought per customer by segment?
+
+Find the average number of units per customer segment:
+```{r}
+unitsCustomerSegment <- data %>%
+  group_by(LYLTY_CARD_NBR, CUSTOMER_SEGMENT) %>% 
+  summarise(PROD_QTY = sum(PROD_QTY))
+mean(unitsCustomerSegment$PROD_QTY)
+```
+The population avg is 6.6 units (i.e. packages of chips per customer per year).
+
+
+```{r}
+avgUnitsCustomerSegment <- unitsCustomerSegment %>% 
+  group_by(CUSTOMER_SEGMENT) %>% 
+  summarise(AVG = mean(PROD_QTY)) 
+avgUnitsCustomerSegment %>% 
+  arrange(desc(AVG))
+```
+I can see clearly from the tibble above that Older Families dominate the Top 3 in terms of average bags of chips per customer segment, and Young Families round out the Top 6.
+
+Find the average of all Older Families segments:
+```{r}
+olderFamilies <- 
+  dplyr::filter(avgUnitsCustomerSegment, grepl("OLDER FAMILIES", CUSTOMER_SEGMENT))
+mean(olderFamilies$AVG)
+```
+Older Families average 9.18 packages of chips per customer.
+
+Find the average of all Young Families segments:
+```{r}
+youngFamilies <- 
+  dplyr::filter(avgUnitsCustomerSegment, grepl("YOUNG FAMILIES", CUSTOMER_SEGMENT))
+mean(youngFamilies$AVG)
+```
+Young Families average 8.73 packages of chips per customer.
+
+```{r fig.height = 5, fig.width = 9}
+unitsCustomerCluster <- data %>%
+  group_by(LYLTY_CARD_NBR, LIFESTAGE, PREMIUM_CUSTOMER) %>% 
+  summarise(PROD_QTY = sum(PROD_QTY))
+avgUnitsCustomerCluster <- unitsCustomerCluster %>% 
+  group_by(LIFESTAGE, PREMIUM_CUSTOMER) %>% 
+  summarise(AVG = mean(PROD_QTY))
+ggplot(data = avgUnitsCustomerCluster, 
+       aes(weight = AVG, x = LIFESTAGE, fill = PREMIUM_CUSTOMER)) +
+  geom_bar(position = position_dodge()) +
+  labs(x = "Lifestage", y = "Avg Number of Units", 
+       title = "Average Number of Units by Customer Segment", 
+       subtitle = "July 2018 to June 2019") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.85)) +
+  geom_hline(yintercept = 6.6, color = "black", size = 1.5)  +
+  annotate("text", label = "pop. avg = 6.6", x = "MIDAGE SINGLES/COUPLES", y = 7.3, 
+           color = "black", size = 3, hjust = "inward", fontface = "bold")
+```
+### Older Families buy the most units per customer (avg 9.18), followed by Young Families (avg 8.73). They are both well above the population average (6.6).
+
+### Since families have more people per household, it is logical that they purchase more packages of chips per customer in order to feed more people. Does the price of chips also affect total sales per customer segment?
+
+### 4. What's the average chip price by customer segment?
+
+Find the average unit price per customer segment:
+```{r}
+priceCustomerCluster <- data %>% 
+  group_by(PREMIUM_CUSTOMER, LIFESTAGE) %>% 
+  summarise(AVG = mean(TOT_SALES / PROD_QTY))
+priceCustomerCluster %>% 
+  arrange(desc(AVG))
+```
+Top 2 Customer Segments with the highest average unit price: Mainstream - YOUNG SINGLES/COUPLES and Mainstream - MIDAGE SINGLES/COUPLES. How does this compare to their Budget and Premium counterparts?
+
+```{r}
+ggplot(data = priceCustomerCluster, 
+       aes(weight = AVG, x = LIFESTAGE, fill = PREMIUM_CUSTOMER)) +
+  geom_bar(position = position_dodge()) +
+  labs(x = "Lifestage", y = "Avg Price per Unit ($)", title = "Price per Unit", 
+       subtitle = "July 2018 to June 2019") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 0.95)) +
+  coord_cartesian(ylim = c(3.25, 4.15))
+```
+
+### Mainstream - YOUNG SINGLES/COUPLES spent the most amount of money per unit ($4.06) followed by Mainstream - MIDAGE SINGLES/COUPLES ($3.99). Both of these segments vastly outperformed their Budget and Premium counterparts. One likely explanation is that premium chips purchasers may be more likely to purchase healthier snacks in general, thus leading them to only purchase snacks for guests and parties (i.e., they may only purchase cheaper chips brands for other people). 
+
+### However, the difference in the prices on the graph are not large. The range of the graph is less than a dollar. So, are these average prices statistically different? 
+
+## PERFORM INDEPENDENT T-TEST BASED ON AVERAGE UNIT PRICE BETWEEN: 
+"Mainstream - YOUNG and MIDAGE SINGLES/COUPLES" (i.e., the Mainstream segment) vs. "Budget and Premium - YOUNG and MIDAGE SINGLES/COUPLES" (i.e., the non-Mainstream segment)
+
+In this t-test, the null hypothesis is that the Mainstream and non-Mainstream segments will have the same average price per unit. The alternative hyptosis is that these segments will not have same average price per unit.
+
+Create a unit price column for the t-test
+```{r}
+data$UNIT_PRICE = data$TOT_SALES / data$PROD_QTY
+head(data)
+```
+
+Create values that represent the Mainstream and non-Mainstream segments:
+```{r}
+target1 <- c("Mainstream - YOUNG SINGLES/COUPLES", "Mainstream - MIDAGE SINGLES/COUPLES")
+target2 <- c("Budget - YOUNG SINGLES/COUPLES", "Budget - MIDAGE SINGLES/COUPLES", 
+             "Premium - YOUNG SINGLES/COUPLES", "Premium - MIDAGE SINGLES/COUPLES")
+```
+
+
+```{r}
+tMainstreamYMASC <- data %>% 
+  select(c(CUSTOMER_SEGMENT, UNIT_PRICE)) %>% 
+  filter(CUSTOMER_SEGMENT %in% target1)
+mean(tMainstreamYMASC$UNIT_PRICE)
+```
+The average unit price for the Mainstream segment is $4.03.
+
+```{r}
+tBudgetPremiumYMASC <- data %>% 
+  select(c(CUSTOMER_SEGMENT, UNIT_PRICE)) %>% 
+  filter(CUSTOMER_SEGMENT %in% target2)
+mean(tBudgetPremiumYMASC$UNIT_PRICE)
+```
+The average unit price for the non-Mainstream segment is  $3.70
+
+### The Mainstream segment has a higher average unit price than the non-Mainstream segment.
+
+Conduct the t-test:
+```{r}
+options(scipen=999) # this disables the scientific notation for clarity
+t.test(tMainstreamYMASC$UNIT_PRICE, tBudgetPremiumYMASC$UNIT_PRICE, 
+       alternative = "greater")
+```
+Since the p-value is less than 0.05, I reject the null hypothesis.
+
+In other words, the mean values of the Mainstream segment's average unit prices and the non-Mainstream segment's average unit prices are significantly different.
+
+### In conclusion, the Mainstream segment's average unit prices ($4.03) are statistically and significantly higher than the non-Mainstream segment's average unit prices ($3.70).
+
+Recall the previous plot to visualize this conclusion:
+```{r fig.height = 5, fig.width = 9}
+ggplot(data = priceCustomerCluster, 
+       aes(weight = AVG, x = LIFESTAGE, fill = PREMIUM_CUSTOMER)) +
+  geom_bar(position = position_dodge()) +
+  labs(x = "Lifestage", y = "Avg Price per Unit ($)", title = "Price per Unit", 
+       subtitle = "July 2018 to June 2019") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.9)) +
+  coord_cartesian(ylim = c(3.25, 4.15)) +
+  geom_hline(yintercept = 4.03, color = "black", size = 1.5) +
+  geom_hline(yintercept = 3.70, color = "black", size = 1.5) +
+  annotate("text", label = "Mainstream Young/Midage Singles/Couples average = $4.03", 
+           x = "OLDER SINGLES/COUPLES", y = 4.10, 
+           color = "black", size = 3.5, fontface = "bold") +
+  annotate("text", label = "Budget/Premium Young/Midage Singles/Couples average = $3.70", 
+           x = "OLDER SINGLES/COUPLES", y = 3.63, 
+           color = "black", size = 3.5, fontface = "bold")
+```
+
+
+## AFFINITY ANALYSIS ON TARGET CUSTOMER SEGMENT
+
+The Mainstream - YOUNG SINGLES/COUPLES customer segment is a significant customer segment as it is near the top of many of my analyses thus far, including the t-test conclusion. I will dive deeper into this customer segment through brand and pack size affinity analysis (i.e., brand preference and pack size preference).
+
+### Do Mainstream - YOUNG SINGLES/COUPLES prefer certain brands more than others? 
+
+For this analysis, the Mainstream - YOUNG SINGLES/COUPLES is the "Target Segment", and all other customer segments are the "Other Segments".
+
+Create values that represent that Mainstream - YOUNG SINGLES/COUPLES segment:
+```{r}
+target3 <- c("Mainstream - YOUNG SINGLES/COUPLES")
+```
+
+Find the product quantity by brand purchased by the Target Segment: 
+```{r}
+brandsMainstreamYSC <- data %>% 
+  filter(CUSTOMER_SEGMENT %in% target3) %>% 
+  group_by(BRANDS) %>% 
+  summarise(PROD_QTY = sum(PROD_QTY))
+tibble(brandsMainstreamYSC) %>% 
+  arrange(desc(PROD_QTY))
+```
+
+Find the product quantity by brand purchased by the Other Segments:
+```{r}
+brandsOtherSegments <- data %>% 
+  filter(!(CUSTOMER_SEGMENT %in% target3)) %>% 
+  group_by(BRANDS) %>% 
+  summarise(PROD_QTY = sum(PROD_QTY))
+tibble(brandsOtherSegments) %>% 
+  arrange(desc(PROD_QTY))
+```
+
+For the Target Segment, calculate the proportion of each brand purchased against all other brands purchased:
+```{r}
+quantity_brandsMainstreamYSC <- brandsMainstreamYSC %>% 
+  summarise(BRANDS, TARGET_SEGMENT = PROD_QTY / sum(PROD_QTY))
+tibble(quantity_brandsMainstreamYSC) %>% 
+  arrange(desc(TARGET_SEGMENT))
+```
+
+For the Other Segments, calculate the proportion of each brand purchased against all other brands purchased:
+```{r}
+quantity_brandsOtherSegments <- brandsOtherSegments %>% 
+  summarise(BRANDS, OTHER_SEGMENTS = PROD_QTY / sum(PROD_QTY))
+tibble(quantity_brandsOtherSegments) %>% 
+  arrange(desc(OTHER_SEGMENTS))
+```
+
+Merge these proportions into one data frame and calculate the brand affinity:
+```{r}
+brand_affinity <- merge(quantity_brandsMainstreamYSC, quantity_brandsOtherSegments) %>% 
+  summarise(BRANDS, TARGET_SEGMENT, OTHER_SEGMENTS, 
+            AFFINITY_TO_BRAND = TARGET_SEGMENT / OTHER_SEGMENTS)
+brand_affinity %>% 
+  arrange(desc(AFFINITY_TO_BRAND))
+```
+### Mainstream - YOUNG SINGLES/COUPLES are 23% more likely to purchase Tyrrells chips compared to the rest of the population
+### Mainstream - YOUNG SINGLES/COUPLES are 56% less likely to purchase Burger Rings compared to the rest of the population
+
+### Do Mainstream - YOUNG SINGLES/COUPLES prefer certain pack sizes more than others?
+
+I will perform similar steps here as the previous brand affinity analysis, and use the same Target Segment and Other Segments.
+
+Find the product quantity by pack size purchased by the Target Segment:
+```{r}
+packMainstreamYSC <- data %>% 
+  filter(CUSTOMER_SEGMENT %in% target3) %>% 
+  group_by(PACK_SIZE) %>% 
+  summarise(PROD_QTY = sum(PROD_QTY))
+tibble(packMainstreamYSC) %>% 
+  arrange(desc(PROD_QTY))
+```
+
+Find the product quantity by pack size purchased by the Other Segments:
+```{r}
+packOtherSegments <- data %>% 
+  filter(!(CUSTOMER_SEGMENT %in% target3)) %>% 
+  group_by(PACK_SIZE) %>% 
+  summarise(PROD_QTY = sum(PROD_QTY))
+tibble(packOtherSegments) %>% 
+  arrange(desc(PROD_QTY))
+```
+
+For the Target Segment, calculate the proportion of each pack size purchased against all other pack sizes purchased:
+```{r}
+quantity_packMainstreamYSC <- packMainstreamYSC %>% 
+  summarise(PACK_SIZE, TARGET_SEGMENT = PROD_QTY / sum(PROD_QTY))
+tibble(quantity_packMainstreamYSC) %>% 
+  arrange(desc(TARGET_SEGMENT))
+```
+
+For the Other Segments, calculate the proportion of each pack size purchased against all other pack sizes purchased:
+```{r}
+quantity_packOtherSegments <- packOtherSegments %>% 
+  summarise(PACK_SIZE, OTHER_SEGMENTS = PROD_QTY / sum(PROD_QTY))
+tibble(quantity_packOtherSegments) %>% 
+  arrange(desc(OTHER_SEGMENTS))
+```
+
+Merge these proportions into one data frame and calculate the pack size affinity:
+```{r}
+pack_affinity <- merge(quantity_packMainstreamYSC, quantity_packOtherSegments) %>% 
+  summarise(PACK_SIZE, TARGET_SEGMENT, OTHER_SEGMENTS, 
+            AFFINITY_TO_PACK_SIZE = TARGET_SEGMENT / OTHER_SEGMENTS)
+pack_affinity %>% 
+  arrange(desc(AFFINITY_TO_PACK_SIZE))
+```
+### Mainstream - YOUNG SINGLES/COUPLES are 27% more likely to purchase a 270g pack of chips compared to the rest of the population
+
+### WHAT BRANDS SELL THIS PACK SIZE?
+
+Find out if there is correlation between brand affinity and pack size affinity:
+```{r}
+data %>% 
+  group_by(PROD_NAME) %>% 
+  distinct(PACK_SIZE) %>% 
+  filter(PACK_SIZE == 270)
+```
+
+### Twisties are the only brand offering 270g packs and so this may instead be reflecting a higher likelihood of purchasing Twisties. Mainstream - YOUNG SINGLES/COUPLES are 22% more likely to purchase Twisties, so this may explain a correlation between brand affinity and pack size affinity.  
+
+## EXPORT MERGED DATA AS CSV FOR TASK 2 AND 3
+```{r}
+write.csv(data,"C:/Users/garci/OneDrive/Desktop/Data Analysis Education/Forage Virtual Internships/Quantium Virtual Experience Program/QVI_data.csv", row.names = FALSE)
+```
+
+## INSIGHTS:
+
+* Sales increased by 22% during the Christmas sales peak.
+
+* The majority of chips transactions involved pack sizes between 150-200g.
+
+* Kettle is by far the best selling brand with nearly 80k products sold. Smith's is 2nd best with just under 60k sold. Pringles and Doritos are roughly tied at 3rd with just under 50k products sold.
+
+* The week leading up to Christmas reflects the general year-long brand trend with Kettle, Smith's, Doritos, and Pringles producing overwhelming sales. Thins and Twisties showed the most improvement.
+
+* Pack sizes purchased during the Christmas sales peak also reflect the general year-long trend: customers prefer pack sizes between 150-200g. In this case, customers overwhelmingly purchased 175g pack sizes (over 3000 sold in one week), as well as the slightly smaller 150g pack size (1800 sold in one week). Somewhat surprisingly, customers did not prefer packages of a size larger than 200g. Perhaps customers were more interested in purchasing a variety of chips brands during the holidays (in order to satisfy different people's tastes), and therefore stuck with a more mainstream pack size for each brand.
+
+* The largest proportion of sales are coming from Budget - Older Families (8.7%), Mainstream - Young Singles/Couples (8.2%), and Mainstream - Retirees (8.1%).
+
+* The large number of customers in the Mainstream - Young Singles/Couples and Mainstream - Retirees segments contributes to their higher chips sales. This is not true for the Budget - Older Families segment, who incidentally have the highest chips sales. Since the Budget - Older Families segment prefers to purchase cheaper chips, one likely explanation is that they simply purchase more quantity of chips for their potentially larger family size. Older families tend to have larger family sizes (more children, and older children who can consume more chips than younger children).
+
+* Older Families buy the most units per customer (avg 9.18), followed by Young Families (avg 8.73). They are both well above the population average (6.6). Since families have more people per household, it is logical that they purchase more packages of chips per customer in order to feed more people.
+
+* Mainstream - YOUNG SINGLES/COUPLES spent the most amount of money per unit ($4.06) followed by Mainstream - MIDAGE SINGLES/COUPLES ($3.99). Both of these segments vastly outperformed their Budget and Premium counterparts. One likely explanation is that premium chips purchasers may be more likely to purchase healthier snacks in general, thus leading them to only purchase snacks for guests and parties (i.e., they may only purchase cheaper chips brands for other people).
+
+* The Mainstream segment's average unit prices ($4.03) are statistically and significantly higher than the non-Mainstream segment's average unit prices ($3.70).
+
+* Target customer segment: Mainstream - YOUNG SINGLES/COUPLES (they are near the top of majority of analyses).
+
+* Mainstream - YOUNG SINGLES/COUPLES are 23% more likely to purchase Tyrrells chips compared to the rest of the population.
+
+* Mainstream - YOUNG SINGLES/COUPLES are 56% less likely to purchase Burger Rings compared to the rest of the population.
+
+* Mainstream - YOUNG SINGLES/COUPLES are 27% more likely to purchase a 270g pack of chips compared to the rest of the population
+
+* Twisties are the only brand offering 270g packs and so this may instead be reflecting a higher likelihood of purchasing Twisties. Mainstream - YOUNG SINGLES/COUPLES are 22% more likely to purchase Twisties, so this may explain a correlation between brand affinity and pack size affinity.
+
+## COMMERCIAL RECOMMENDATIONS:
+* Kettles, Smith's, Pringles, and Doritos are by far the best selling brands. These should be kept well in stock year-round.
+
+* Thins and Twisties show a slight sales improvement prior to Christmas. This could be useful for promoting them during the holiday season.
+
+* Since customers continue to purchase the standard 150-200g pack sizes during the Christmas sales peak, there could be more promotional offers on pack sizes of 200g+. 
+
+* Twisties could also be off-located in other parts of the store that mainstream young singles/couples are likely to be shopping.
+
+* Similarly, other top brands with large pack size like Doritos can be offlocated in same location as Twisties to increase sales.
+
+* It's possible that large pack size brands like Smiths and Cheezels could see an uptick if also offlocated to similar parts of the store.
